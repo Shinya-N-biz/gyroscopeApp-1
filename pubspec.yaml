@@ -13,6 +13,8 @@ dependencies:
   cupertino_icons: ^1.0.2
   sensors_plus: ^4.0.2
   vibration: ^1.8.4
+  audioplayers: ^5.2.0  # 追加: 音楽再生用パッケージ
+  shared_preferences: ^2.2.2  # 追加: 設定保存用パッケージ
 
 dev_dependencies:
   flutter_test:
@@ -25,3 +27,4 @@ flutter:
   # 画像アセットを追加
   assets:
     - assets/images/
+    - assets/audio/  # 追加: 音楽ファイル用ディレクトリ
