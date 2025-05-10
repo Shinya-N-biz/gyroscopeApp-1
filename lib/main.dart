@@ -3,29 +3,67 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:vibration/vibration.dart';
+
+// アプリ全体でテーマモードを管理するクラス
+class ThemeProvider extends ChangeNotifier {
+  ThemeMode _themeMode = ThemeMode.dark; // 初期値をダークモードに設定
+
+  ThemeMode get themeMode => _themeMode;
+
+  void toggleTheme() {
+    _themeMode = _themeMode == ThemeMode.light 
+                 ? ThemeMode.dark 
+                 : ThemeMode.light;
+    notifyListeners();
+  }
+}
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final ThemeProvider _themeProvider = ThemeProvider();
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ボール移動デモ',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const BallPage(),
+    return AnimatedBuilder(
+      animation: _themeProvider,
+      builder: (context, child) {
+        return MaterialApp(
+          title: 'ボール移動デモ',
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.deepPurple,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          themeMode: _themeProvider.themeMode, // テーマモードを設定
+          home: BallPage(themeProvider: _themeProvider),
+        );
+      }
     );
   }
 }
 
 class BallPage extends StatefulWidget {
-  const BallPage({super.key});
+  final ThemeProvider themeProvider;
+  
+  const BallPage({super.key, required this.themeProvider});
+  
   @override
   State<BallPage> createState() => _BallPageState();
 }
@@ -44,7 +82,14 @@ class _BallPageState extends State<BallPage> {
   int selectedAxis = 0; // X軸をデフォルトに変更
   String axisNames = "XYZ";
   StreamSubscription? _gyroSub;
-  bool lastCountedAtTop = false;
+  
+  // カウンター状態変数
+  bool reachedTop = false;    // 最上部に到達したかどうか
+  bool reachedBottom = true;  // 最初は下からスタートとみなす
+  
+  // バイブレーション制御用
+  bool canVibrate = false;
+  DateTime? lastVibration;
 
   // センサーデータのデバッグ用
   double gyroX = 0.0;
@@ -55,6 +100,9 @@ class _BallPageState extends State<BallPage> {
   @override
   void initState() {
     super.initState();
+    
+    // バイブレーション機能をチェック
+    _checkVibrationSupport();
 
     try {
       // ジャイロスコープセンサーのリスナーをセットアップ
@@ -96,21 +144,28 @@ class _BallPageState extends State<BallPage> {
           if (ballPosition < 0) ballPosition = 0;
           if (ballPosition > 1) ballPosition = 1;
 
-          // 上部に達した場合
+          // 最上部に達した場合
           if (ballPosition <= 0.0 && previousPosition > 0.0) {
-            // 前回のカウントが下部だった場合のみカウント
-            if (lastCountedAtTop == false) {
-              counter++;
-              lastCountedAtTop = true;
+            // 最上部に到達時にバイブレーション
+            _vibrateIfNeeded();
+            
+            // 下からスタートして上に到達した場合
+            if (reachedBottom) {
+              reachedTop = true;
+              reachedBottom = false;
             }
           }
 
-          // 下部に達した場合
+          // 最下部に達した場合
           if (ballPosition >= 1.0 && previousPosition < 1.0) {
-            // 前回のカウントが上部だった場合のみカウント
-            if (lastCountedAtTop == true) {
-              counter++;
-              lastCountedAtTop = false;
+            // 最下部に到達時にバイブレーション
+            _vibrateIfNeeded();
+            
+            // 上に到達してから下に戻った場合、カウント増加
+            if (reachedTop) {
+              counter++; // 1サイクル完了でカウント増加
+              reachedTop = false;
+              reachedBottom = true;
             }
           }
         });
@@ -118,6 +173,38 @@ class _BallPageState extends State<BallPage> {
     } catch (e) {
       print('センサー初期化エラー: $e');
       sensorAvailable = false;
+    }
+  }
+  
+  // バイブレーション機能をチェック
+  Future<void> _checkVibrationSupport() async {
+    if (!kIsWeb) {
+      try {
+        canVibrate = await Vibration.hasVibrator() ?? false;
+      } catch (e) {
+        canVibrate = false;
+        print('バイブレーション機能チェックエラー: $e');
+      }
+    }
+  }
+  
+  // 必要に応じてバイブレーションを実行（連続実行防止付き）
+  void _vibrateIfNeeded() {
+    if (!canVibrate) return;
+    
+    // 連続実行防止（前回から1秒以内は実行しない）
+    final now = DateTime.now();
+    if (lastVibration != null && now.difference(lastVibration!).inMilliseconds < 1000) {
+      return;
+    }
+    
+    lastVibration = now;
+    
+    try {
+      // 0.5秒のバイブレーション
+      Vibration.vibrate(duration: 500);
+    } catch (e) {
+      print('バイブレーション実行エラー: $e');
     }
   }
 
@@ -128,21 +215,20 @@ class _BallPageState extends State<BallPage> {
     super.dispose();
   }
 
-  // テスト用ボタン操作
+  // テスト用ボタン操作を修正
   void moveBallUp() {
     setState(() {
-      // 前回の位置を保存
       double previousPosition = ballPosition;
-
       ballPosition -= 0.1;
       if (ballPosition < 0) ballPosition = 0;
-
-      // 上部に達した場合
+      
+      // 最上部に達した場合
       if (ballPosition <= 0.0 && previousPosition > 0.0) {
-        // 前回のカウントが下部だった場合のみカウント
-        if (lastCountedAtTop == false) {
-          counter++;
-          lastCountedAtTop = true;
+        _vibrateIfNeeded();
+        
+        if (reachedBottom) {
+          reachedTop = true;
+          reachedBottom = false;
         }
       }
     });
@@ -150,18 +236,18 @@ class _BallPageState extends State<BallPage> {
 
   void moveBallDown() {
     setState(() {
-      // 前回の位置を保存
       double previousPosition = ballPosition;
-
       ballPosition += 0.1;
       if (ballPosition > 1) ballPosition = 1;
-
-      // 下部に達した場合
+      
+      // 最下部に達した場合
       if (ballPosition >= 1.0 && previousPosition < 1.0) {
-        // 前回のカウントが上部だった場合のみカウント
-        if (lastCountedAtTop == true) {
+        _vibrateIfNeeded();
+        
+        if (reachedTop) {
           counter++;
-          lastCountedAtTop = false;
+          reachedTop = false;
+          reachedBottom = true;
         }
       }
     });
@@ -170,7 +256,8 @@ class _BallPageState extends State<BallPage> {
   void resetCounter() {
     setState(() {
       counter = 0;
-      lastCountedAtTop = false; // リセット時は最後のカウントを下部とする（次は上部でカウント）
+      reachedTop = false;
+      reachedBottom = true; // リセット時は下部スタートにする
     });
   }
 
@@ -205,6 +292,120 @@ class _BallPageState extends State<BallPage> {
     });
   }
 
+  // ジャイロ設定ダイアログを表示
+  void _showGyroscopeSettings() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('ジャイロスコープ設定'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // センサー状態表示
+                sensorAvailable
+                    ? Text('センサー: 使用可能', style: TextStyle(color: Colors.green))
+                    : Text('センサー: 使用不可', style: TextStyle(color: Colors.red)),
+                
+                const SizedBox(height: 15),
+                
+                // 軸と感度の設定
+                Text('使用軸: ${axisNames[selectedAxis]}', style: TextStyle(fontWeight: FontWeight.bold)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton(
+                      onPressed: changeAxis,
+                      child: const Text('軸を変更'),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      onPressed: toggleInvertAxis,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: invertAxis ? Colors.orange : null,
+                      ),
+                      child: Text(invertAxis ? '軸反転: ON' : '軸反転: OFF'),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 15),
+
+                // 感度調整
+                Text('感度設定', style: TextStyle(fontWeight: FontWeight.bold)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${axisNames[selectedAxis]}軸: ${(axisSensitivity[selectedAxis] ?? 0.015).toStringAsFixed(3)}',
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton(
+                      icon: const Icon(Icons.remove),
+                      onPressed: decreaseSensitivity,
+                      tooltip: '感度を下げる',
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: increaseSensitivity,
+                      tooltip: '感度を上げる',
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 15),
+                
+                // デバッグ情報表示
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'ジャイロセンサーの値',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        'X軸: ${gyroX.toStringAsFixed(5)} (感度: ${axisSensitivity[0]?.toStringAsFixed(3)})',
+                        style: TextStyle(
+                          color: selectedAxis == 0 ? Colors.red : null,
+                        ),
+                      ),
+                      Text(
+                        'Y軸: ${gyroY.toStringAsFixed(5)} (感度: ${axisSensitivity[1]?.toStringAsFixed(3)})',
+                        style: TextStyle(
+                          color: selectedAxis == 1 ? Colors.red : null,
+                        ),
+                      ),
+                      Text(
+                        'Z軸: ${gyroZ.toStringAsFixed(5)} (感度: ${axisSensitivity[2]?.toStringAsFixed(3)})',
+                        style: TextStyle(
+                          color: selectedAxis == 2 ? Colors.red : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('閉じる'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // バーとボールのサイズ定義
@@ -215,11 +416,29 @@ class _BallPageState extends State<BallPage> {
     // 現在選択されている軸の感度
     double currentSensitivity = axisSensitivity[selectedAxis] ?? 0.015;
 
+    // テーマモードを確認
+    bool isDarkMode = widget.themeProvider.themeMode == ThemeMode.dark;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('ボール移動デモ'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          // ジャイロ設定ボタン
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showGyroscopeSettings,
+            tooltip: 'ジャイロスコープ設定',
+          ),
+          // テーマ切り替えボタン
+          IconButton(
+            icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
+            onPressed: () {
+              widget.themeProvider.toggleTheme();
+            },
+            tooltip: isDarkMode ? 'ライトモードに切替' : 'ダークモードに切替',
+          ),
+          // リセットボタン
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: resetCounter,
@@ -234,6 +453,7 @@ class _BallPageState extends State<BallPage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const SizedBox(height: 20), // 上部の余白
+              
               // カウンターとリセットボタン
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -252,97 +472,7 @@ class _BallPageState extends State<BallPage> {
                 ],
               ),
 
-              const SizedBox(height: 10),
-
-              // センサー設定コントロール
-              const SizedBox(height: 10),
-              Text('ジャイロ設定', style: TextStyle(fontWeight: FontWeight.bold)),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    '${axisNames[selectedAxis]}軸の感度: ${currentSensitivity.toStringAsFixed(3)}',
-                  ),
-                  const SizedBox(width: 10),
-                  IconButton(
-                    icon: const Icon(Icons.remove),
-                    onPressed: decreaseSensitivity,
-                    tooltip: '感度を下げる',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: increaseSensitivity,
-                    tooltip: '感度を上げる',
-                  ),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ElevatedButton.icon(
-                    icon: Icon(
-                      invertAxis ? Icons.swap_vert : Icons.swap_vert_outlined,
-                    ),
-                    label: Text(invertAxis ? '軸反転: ON' : '軸反転: OFF'),
-                    onPressed: toggleInvertAxis,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: invertAxis ? Colors.orange : null,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.screen_rotation),
-                    label: Text('使用軸: ${axisNames[selectedAxis]}'),
-                    onPressed: changeAxis,
-                  ),
-                ],
-              ),
-
-              // センサー状態表示
-              sensorAvailable
-                  ? Text('センサー: 使用可能', style: TextStyle(color: Colors.green))
-                  : Text('センサー: 使用不可', style: TextStyle(color: Colors.red)),
-
-              // デバッグ情報表示 - 各軸の感度も表示
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      'ジャイロセンサーの値',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'X軸: ${gyroX.toStringAsFixed(5)} (感度: ${axisSensitivity[0]?.toStringAsFixed(3)})',
-                      style: TextStyle(
-                        color: selectedAxis == 0 ? Colors.red : Colors.black,
-                      ),
-                    ),
-                    Text(
-                      'Y軸: ${gyroY.toStringAsFixed(5)} (感度: ${axisSensitivity[1]?.toStringAsFixed(3)})',
-                      style: TextStyle(
-                        color: selectedAxis == 1 ? Colors.red : Colors.black,
-                      ),
-                    ),
-                    Text(
-                      'Z軸: ${gyroZ.toStringAsFixed(5)} (感度: ${axisSensitivity[2]?.toStringAsFixed(3)})',
-                      style: TextStyle(
-                        color: selectedAxis == 2 ? Colors.red : Colors.black,
-                      ),
-                    ),
-                    Text(
-                      '現在使用中: ${axisNames[selectedAxis]}軸${invertAxis ? " (反転)" : ""}',
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 10),
+              const SizedBox(height: 20),
 
               // 上移動ボタン
               ElevatedButton(onPressed: moveBallUp, child: const Text('上に移動')),
@@ -392,7 +522,7 @@ class _BallPageState extends State<BallPage> {
 
               const SizedBox(height: 10),
               Text(
-                'カウンター: $counter/10',
+                '下→上→下で1カウント: $counter/10',
                 style: TextStyle(
                   fontSize: 18,
                   color: counter >= 10 ? Colors.green : Colors.black,
@@ -404,12 +534,23 @@ class _BallPageState extends State<BallPage> {
               const SizedBox(height: 10),
               kIsWeb
                   ? const Text(
-                    '※Webブラウザではセンサーが使えない場合があります',
+                    '※Webブラウザではセンサーとバイブレーションが使えない場合があります',
                     style: TextStyle(color: Colors.red),
                   )
-                  : const Text('端末を前後に傾けてボールを動かしてください'),
-              const Text('設定を調整して最適な動きになるよう調整してください'),
-              const Text('最上部・最下部でカウンターが増えます'),
+                  : Column(
+                      children: [
+                        const Text('端末を前後に傾けてボールを動かしてください'),
+                        const Text('下→上→下で1カウントします'),
+                        Text(canVibrate 
+                          ? '最上部・最下部でバイブレーションします' 
+                          : 'バイブレーション機能は使用できません',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: canVibrate ? Colors.green : Colors.orange,
+                          ),
+                        ),
+                      ],
+                    ),
 
               const SizedBox(height: 20), // 下部の余白
             ],

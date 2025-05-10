@@ -14,6 +14,7 @@ subprojects {
 }
 subprojects {
     project.evaluationDependsOn(":app")
+    ndkVersion = "29.0.13113456"
 }
 
 tasks.register<Delete>("clean") {
