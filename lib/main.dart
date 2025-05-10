@@ -292,6 +292,20 @@ class _BallPageState extends State<BallPage> {
     });
   }
 
+  // 画像の状態を取得するメソッド
+  String _getImageBasedOnPosition() {
+    if (ballPosition <= 0.2) {
+      // 上部に近い場合（画像3）
+      return 'assets/images/situp_up.png';
+    } else if (ballPosition >= 0.8) {
+      // 下部に近い場合（画像1）
+      return 'assets/images/situp_down.png';
+    } else {
+      // 中間位置（画像2）
+      return 'assets/images/situp_middle.png';
+    }
+  }
+
   // ジャイロ設定ダイアログを表示
   void _showGyroscopeSettings() {
     showDialog(
@@ -419,9 +433,12 @@ class _BallPageState extends State<BallPage> {
     // テーマモードを確認
     bool isDarkMode = widget.themeProvider.themeMode == ThemeMode.dark;
 
+    // 表示する画像を取得
+    String currentImage = _getImageBasedOnPosition();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ボール移動デモ'),
+        title: const Text('腹筋トレーニング'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           // ジャイロ設定ボタン
@@ -478,40 +495,25 @@ class _BallPageState extends State<BallPage> {
               ElevatedButton(onPressed: moveBallUp, child: const Text('上に移動')),
 
               const SizedBox(height: 10),
-              // バーとボール
+              
+              // 腹筋運動の画像表示（バーとボールの代わりに）
               Container(
-                width: 100, // ボールが表示されるよう十分な幅
-                height: barHeight + 20, // 余白も含む
+                width: 280, // すべての画像が同じサイズで表示されるよう固定
+                height: 200, // すべての画像が同じサイズで表示されるよう固定
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Stack(
-                  alignment: Alignment.topCenter,
-                  children: [
-                    // バー
-                    Container(
-                      width: barWidth,
-                      height: barHeight,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    // ボール
-                    Positioned(
-                      top: ballPosition * (barHeight - ballSize),
-                      child: Container(
-                        width: ballSize,
-                        height: ballSize,
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                  ],
+                child: Center(
+                  child: Image.asset(
+                    currentImage,
+                    fit: BoxFit.contain, // アスペクト比を維持しながら指定サイズに収める
+                    width: 240,
+                    height: 180,
+                  ),
                 ),
               ),
+              
               const SizedBox(height: 10),
 
               // 下移動ボタン
@@ -539,7 +541,7 @@ class _BallPageState extends State<BallPage> {
                   )
                   : Column(
                       children: [
-                        const Text('端末を前後に傾けてボールを動かしてください'),
+                        const Text('端末を前後に傾けて腹筋運動をしてください'),
                         const Text('下→上→下で1カウントします'),
                         Text(canVibrate 
                           ? '最上部・最下部でバイブレーションします' 
