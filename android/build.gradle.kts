@@ -14,6 +14,9 @@ subprojects {
 }
 subprojects {
     project.evaluationDependsOn(":app")
+}
+
+android {
     ndkVersion = "29.0.13113456"
 }
 

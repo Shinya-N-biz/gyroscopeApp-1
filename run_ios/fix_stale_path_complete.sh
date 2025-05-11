@@ -55,7 +55,9 @@ flutter clean
 
 # プロジェクトの修復
 echo "🔄 プロジェクトを修復しています..."
-flutter create --platforms=ios . --project-name="$(basename "$PROJECT_ROOT")"
+# 以前: flutter create --platforms=ios . --project-name="$(basename "$PROJECT_ROOT")"
+# 修正:
+flutter create . --platforms=ios --project-name="$(basename "$PROJECT_ROOT")"
 
 # 依存関係を再インストール
 echo "🔄 依存関係を再インストールしています..."

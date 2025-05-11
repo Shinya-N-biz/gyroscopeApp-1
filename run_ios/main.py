@@ -513,52 +513,54 @@ exit 0
     
     return True
 
-def fix_package_dependencies():
-    """Flutterプロジェクトの依存関係を修正する"""
-    print("\n🛠️ パッケージの依存関係を修正しています...")
+def fix_flutter_dependencies():
+    """Flutterの依存関係の問題を修正する"""
+    print("\n🛠️ Flutterの依存関係の問題を修正しています...")
     
     # 依存関係修正スクリプト作成
-    fix_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fix_pubspec_dependencies.sh")
+    fix_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fix_dependencies.sh")
     if not os.path.exists(fix_script):
         with open(fix_script, 'w') as f:
             f.write('''#!/bin/bash
 
-echo "=== Flutter 依存関係修正スクリプト v1.0 ==="
+echo "=== Flutter 依存関係修復スクリプト v1.0 ==="
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 echo "プロジェクトルート: $PROJECT_ROOT"
 
-PUBSPEC="$PROJECT_ROOT/pubspec.yaml"
+# まずはクリーンアップを行う
+echo "🧹 プロジェクトをクリーンアップしています..."
+cd "$PROJECT_ROOT" && flutter clean
 
-# バックアップ作成
-cp "$PUBSPEC" "${PUBSPEC}.bak"
-echo "✅ pubspec.yamlのバックアップを作成しました: ${PUBSPEC}.bak"
+# pubspec.lockを削除して依存関係を再解決
+if [ -f "$PROJECT_ROOT/pubspec.lock" ]; then
+  echo "🔄 pubspec.lockを削除して新しく依存関係を解決します..."
+  rm "$PROJECT_ROOT/pubspec.lock"
+fi
 
-# audioplayers_darwinのバージョンを更新
-echo "🔧 audioplayers_darwinのバージョン制約を更新しています..."
-sed -i.tmp 's/audioplayers_darwin: .*/audioplayers_darwin: ^5.0.2/g' "$PUBSPEC"
-rm -f "${PUBSPEC}.tmp"
-
-echo "✅ pubspec.yamlを更新しました"
-
-# 依存関係の再解決
-echo "🔄 依存関係を再解決しています..."
+# 正しいコマンドで依存関係を取得
+echo "🔄 正しいコマンドで依存関係を取得しています..."
 cd "$PROJECT_ROOT" && flutter pub get
 
-# CocoaPodsのセットアップ
-echo "🔄 CocoaPodsをセットアップしています..."
-cd "$PROJECT_ROOT/ios" && flutter precache --ios
-cd "$PROJECT_ROOT/ios" && rm -rf Pods .symlinks Podfile.lock
-cd "$PROJECT_ROOT" && flutter pub get
-cd "$PROJECT_ROOT/ios" && pod install
+# iOS関連のファイルをクリーンアップして再生成
+echo "🧹 iOSビルドファイルをクリーンアップしています..."
+rm -rf "$PROJECT_ROOT/ios/Pods"
+rm -rf "$PROJECT_ROOT/ios/.symlinks"
+rm -f "$PROJECT_ROOT/ios/Podfile.lock"
+rm -rf "$PROJECT_ROOT/ios/Flutter/Flutter.podspec"
 
-echo "✅ 依存関係の修正が完了しました"
+# CocoaPodsのセットアップとインストール
+echo "🔄 CocoaPodsを再インストールしています..."
+cd "$PROJECT_ROOT/ios" && pod deintegrate || true
+cd "$PROJECT_ROOT/ios" && pod install --repo-update
+
+echo "✅ 依存関係の修復が完了しました"
 exit 0
 ''')
         os.chmod(fix_script, 0o755)
     
     # スクリプト実行
-    print("🔧 依存関係修正スクリプトを実行しています...")
-    run_command(f"bash {fix_script}", "依存関係修正処理")
+    print("🔧 依存関係修復スクリプトを実行しています...")
+    run_command(f"bash {fix_script}", "依存関係修復処理")
     
     return True
 
@@ -627,7 +629,7 @@ def main():
         print("\nFlutterアプリをビルドしています...")
         
         # パッケージの依存関係を修正（新規追加）
-        fix_package_dependencies()
+        fix_flutter_dependencies()
         
         # AudioPlayersプラグイン専用の修正を実行
         audioplayers_fix_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fix_audioplayers_plugin.sh")
