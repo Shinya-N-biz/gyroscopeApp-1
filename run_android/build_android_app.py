@@ -254,40 +254,6 @@ def check_android_ndk():
     print(f"✅ NDKの設定を更新しました: {ndk_full_path}")
     return True
 
-def check_cocoapods():
-    """CocoaPodsがインストールされているか確認し、ない場合はインストール方法を表示する"""
-    print("\n環境チェック: CocoaPods")
-    
-    if platform.system() != "Darwin":  # macOSの場合のみ確認
-        return True
-        
-    try:
-        result = subprocess.run("pod --version", shell=True, text=True, capture_output=True)
-        if result.returncode == 0:
-            print(f"✅ CocoaPodsがインストールされています (バージョン: {result.stdout.strip()})")
-            return True
-    except Exception:
-        pass
-    
-    print("❌ CocoaPodsがインストールされていません。")
-    print("\nCocoaPodsをインストールするには以下のコマンドを実行します:")
-    
-    if input("sudo gem install cocoapods を実行しますか？ (y/n): ").lower() == 'y':
-        print("\nCocoaPodsをインストール中...")
-        try:
-            # gemでCocoaPodsをインストール
-            subprocess.run("sudo gem install cocoapods", shell=True, check=True)
-            print("✅ CocoaPodsが正常にインストールされました。")
-            return True
-        except subprocess.CalledProcessError:
-            print("⚠️ CocoaPodsのインストールに失敗しました。")
-    
-    print("\nCocoaPodsを手動でインストールするには次のコマンドを実行してください:")
-    print("sudo gem install cocoapods")
-    print("または")
-    print("brew install cocoapods")
-    return False
-
 def build_android_apk(release_mode=True, verbose=False, skip_clean=False, fast_build=False):
     """Android APKをビルドする"""
     # NDKチェックを追加
@@ -371,196 +337,26 @@ def build_android_apk(release_mode=True, verbose=False, skip_clean=False, fast_b
     
     return True
 
-def build_ios_debug(verbose=False, skip_clean=False, auto_install=False):
-    """iOS用のデバッグビルドを作成"""
-    if platform.system() != "Darwin":
-        print("iOSビルドはmacOSでのみ実行できます。")
-        return False
-
-    # CocoaPodsチェックを追加
-    if not check_cocoapods():
-        print("⚠️ CocoaPodsがインストールされていないか、PATHに設定されていません。ビルドをスキップします。")
-        return False
-
-    # 開始時間を記録
-    start_time = time.time()
-
-    # クリーンビルドは時間がかかるのでスキップオプション
-    if not skip_clean:
-        clean_success, _ = run_command("flutter clean", "Flutterプロジェクトをクリーン", show_progress=True)
-        if not clean_success:
-            print("警告: クリーンに失敗しましたが、ビルドを続行します")
-    else:
-        print("クリーンステップをスキップします")
-
-    # 依存関係を解決
-    pub_success, _ = run_command("flutter pub get", "Flutter依存関係の解決", timeout=120, show_progress=True)
-    if not pub_success:
-        print("⚠️ 依存関係の解決に失敗しました。")
-        return False
-    
-    # ポッドのインストール
-    pod_success, _ = run_command("cd ios && pod install", "CocoaPodsのインストール", timeout=300, show_progress=True)
-    if not pod_success:
-        print("⚠️ CocoaPodsのインストールに失敗しました。")
-        print("以下のコマンドを試してみてください:")
-        print("cd ios && pod install --repo-update")
-        
-        # pod repo update の実行を提案
-        if input("pod repo update を実行しますか？ (y/n): ").lower() == 'y':
-            print("\nPod repoを更新中...")
-            run_command("pod repo update", "Pod Repo更新", timeout=300, show_progress=True)
-            # 再試行
-            pod_success, _ = run_command("cd ios && pod install --repo-update", 
-                                      "CocoaPodsのインストール (リトライ)", 
-                                      timeout=300, show_progress=True)
-            if not pod_success:
-                print("⚠️ CocoaPodsのインストールにまた失敗しました。")
-                return False
-        else:
-            return False
-    
-    # ビルド前の追加フラグ
-    extra_flags = "--verbose" if verbose else ""
-    
-    print("\n⏱️ iOSビルドには数分かかる場合があります。\n")
-    
-    # iOSビルド
-    build_success, _ = run_command(f"flutter build ios --debug --no-codesign {extra_flags}", 
-                               "iOSデバッグビルド", timeout=900, show_progress=True)
-    if not build_success:
-        print("⚠️ iOSビルドに失敗しました。")
-        return False
-    
-    # ビルド時間の計算
-    build_duration = time.time() - start_time
-    minutes, seconds = divmod(int(build_duration), 60)
-        
-    print(f"\n✅ iOSデバッグビルドが正常に作成されました (所要時間: {minutes}分{seconds}秒)")
-    
-    # 自動インストールオプションが有効な場合
-    if auto_install:
-        print("\n実機にアプリをインストールしています...")
-        return install_ios_to_device(verbose)
-    else:
-        print("Xcodeで開き、実機にインストールするには:")
-        print("1. open ios/Runner.xcworkspace")
-        print("2. 左上のデバイス選択から接続された実機を選択")
-        print("3. ▶️ボタンをクリックしてビルド&インストール")
-        
-        # Xcodeを開くか尋ねる
-        if input("\nXcodeを開きますか？ (y/n): ").lower() == 'y':
-            subprocess.Popen("open ios/Runner.xcworkspace", shell=True)
-            print("Xcodeが開かれました。左上のデバイス選択から接続された実機を選択し、▶️ボタンをクリックしてインストールしてください。")
-    
-    return True
-
-def install_ios_to_device(verbose=False):
-    """iOSアプリを実機にインストールする"""
-    print("\n接続されているiOSデバイスを確認しています...")
-    
-    # 接続されているiOSデバイスを確認
-    success, devices_output = run_command("xcrun xctrace list devices", "接続デバイスのリスト取得", show_progress=False)
-    if not success:
-        print("⚠️ 接続されているデバイスを確認できませんでした。")
-        return False
-    
-    # iPhone/iPadデバイスを抽出
-    devices = []
-    for line in devices_output.splitlines():
-        if "iPhone" in line or "iPad" in line:
-            if "Simulator" not in line:  # シミュレータは除外
-                devices.append(line)
-    
-    if not devices:
-        print("⚠️ 接続されているiOSデバイスが見つかりません。")
-        print("デバイスがUSBで接続されていること、および信頼設定がされていることを確認してください。")
-        return False
-    
-    # デバイスが複数ある場合は選択肢を表示
-    selected_device = None
-    if len(devices) > 1:
-        print("\n複数のデバイスが見つかりました。インストール先を選択してください:")
-        for i, device in enumerate(devices, 1):
-            print(f"{i}: {device}")
-        
-        try:
-            choice = int(input("選択 (番号): "))
-            if 1 <= choice <= len(devices):
-                selected_device = devices[choice-1]
-            else:
-                print("⚠️ 無効な選択です。")
-                return False
-        except ValueError:
-            print("⚠️ 無効な入力です。")
-            return False
-    else:
-        selected_device = devices[0]
-    
-    print(f"選択されたデバイス: {selected_device}")
-    
-    # デバイスIDを抽出
-    # 例: "iPhone 13 Pro (16.0) (abcd1234-5678-90ef-ghij-klmnopqrstuv)"
-    device_id_match = re.search(r'\(([\w-]+)\)$', selected_device)
-    if not device_id_match:
-        print("⚠️ デバイスIDを抽出できませんでした。")
-        return False
-    
-    device_id = device_id_match.group(1)
-    
-    print(f"\nアプリを '{selected_device}' にインストールしています...")
-    
-    # 開発者チーム設定が必要な場合がある
-    team_id = None
-    development_team_file = "ios/Runner.xcodeproj/project.pbxproj"
-    if os.path.exists(development_team_file):
-        try:
-            with open(development_team_file, 'r') as f:
-                content = f.read()
-                team_match = re.search(r'DEVELOPMENT_TEAM\s*=\s*"?([A-Z0-9]+)"?;', content)
-                if team_match:
-                    team_id = team_match.group(1)
-        except Exception as e:
-            print(f"⚠️ チームID取得エラー: {e}")
-    
-    # インストールコマンドの実行
-    install_cmd = f"flutter install --device-id={device_id}"
-    if verbose:
-        install_cmd += " -v"
-    
-    print(f"コマンド: {install_cmd}")
-    install_success, _ = run_command(install_cmd, "アプリのインストール", timeout=180, show_progress=True)
-    
-    if install_success:
-        print("\n✅ アプリが実機に正常にインストールされました！")
-        return True
-    else:
-        print("\n⚠️ アプリのインストールに失敗しました。")
-        print("考えられる原因:")
-        print("1. デバイスが開発モードになっていない")
-        print("2. プロビジョニングプロファイルが設定されていない")
-        print("3. Appleデベロッパーアカウントの設定が必要")
-        
-        print("\n手動でXcodeを開いてインストールしますか？")
-        if input("Xcodeを開く (y/n): ").lower() == 'y':
-            subprocess.Popen("open ios/Runner.xcworkspace", shell=True)
-            print("Xcodeが開かれました。左上のデバイス選択から接続された実機を選択し、▶️ボタンをクリックしてインストールしてください。")
-        
-        return False
+def get_flutter_version():
+    """Flutterのバージョンを取得する"""
+    try:
+        result = subprocess.run("flutter --version", shell=True, text=True, capture_output=True)
+        if result.returncode == 0:
+            return result.stdout.splitlines()[0]
+    except Exception:
+        pass
+    return "Unknown"
 
 def main():
     """メイン実行関数"""
-    parser = argparse.ArgumentParser(description="Flutter アプリケーションをビルドするスクリプト")
-    parser.add_argument('--platform', choices=['android', 'ios', 'all'], default='all',
-                        help='ビルドするプラットフォームを指定 (android, ios, all)')
+    parser = argparse.ArgumentParser(description="Flutter アプリケーションのAndroid APKをビルド")
     parser.add_argument('--debug', action='store_true', help='デバッグモードでビルド')
     parser.add_argument('--verbose', action='store_true', help='詳細な出力を表示')
     parser.add_argument('--no-clean', action='store_true', help='クリーンステップをスキップして高速化')
     parser.add_argument('--fast-build', action='store_true', help='高速ビルド (サイズ最適化を無効化)')
-    parser.add_argument('--install', action='store_true', help='ビルド後に実機にインストール')
     args = parser.parse_args()
     
-    print("=== ジャイロスコープアプリビルドスクリプト ===")
+    print("=== ジャイロスコープアプリ Android ビルドスクリプト ===")
     
     # Flutter Doctorの実行を提案
     if input("Flutter doctor を実行して環境を確認しますか？ (y/n): ").lower() == 'y':
@@ -579,10 +375,6 @@ def main():
     if not check_flutter_installation():
         return 1
     
-    # 実行するプラットフォームの判断
-    build_android = args.platform in ['android', 'all']
-    build_ios = args.platform in ['ios', 'all']
-    
     # プロジェクトディレクトリの確認
     if not os.path.exists('lib/main.dart'):
         print("エラー: このディレクトリはFlutterプロジェクトではないようです。")
@@ -590,26 +382,20 @@ def main():
         return 1
     
     # 出力フォルダの準備
-    os.makedirs("output", exist_ok=True)
+    os.makedirs("output/android", exist_ok=True)
     
     # ビルドの実行
     success = True
     
     try:
-        if build_android:
-            if not build_android_apk(not args.debug, args.verbose, args.no_clean, args.fast_build):
-                success = False
-                print("⚠️ Android APKのビルドに失敗しました")
-        
-        if build_ios:
-            if not build_ios_debug(args.verbose, args.no_clean, args.install):
-                success = False
-                print("⚠️ iOSビルドに失敗しました")
+        if not build_android_apk(not args.debug, args.verbose, args.no_clean, args.fast_build):
+            success = False
+            print("⚠️ Android APKのビルドに失敗しました")
         
         if success:
-            print("\n✨ すべてのビルドが正常に完了しました! ✨")
+            print("\n✨ Androidビルドが正常に完了しました! ✨")
         else:
-            print("\n⚠️ 一部のビルドで問題が発生しました。上記のエラーを確認してください。")
+            print("\n⚠️ ビルドで問題が発生しました。上記のエラーを確認してください。")
             return 1
     
     except KeyboardInterrupt:
@@ -618,29 +404,17 @@ def main():
     
     # 問題があったとき、エラーメッセージをログファイルに保存
     if not success:
-        log_filename = f"build_error_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        log_filename = f"android_build_error_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         try:
             with open(log_filename, 'w') as f:
-                f.write("=== ビルドエラーログ ===\n")
+                f.write("=== Androidビルドエラーログ ===\n")
                 f.write(f"日時: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"Flutterバージョン: {get_flutter_version()}\n")
                 f.write("エラーメッセージ:\n")
-                # エラーメッセージがあれば書き込む（ここにエラー情報を追加する必要がある）
-            print(f"\nエラーログが {log_filename} に保存されました。")
         except Exception as e:
             print(f"エラーログの保存に失敗しました: {e}")
     
     return 0 if success else 1
-
-def get_flutter_version():
-    """Flutterのバージョンを取得する"""
-    try:
-        result = subprocess.run("flutter --version", shell=True, text=True, capture_output=True)
-        if result.returncode == 0:
-            return result.stdout.splitlines()[0]
-    except Exception:
-        pass
-    return "Unknown"
 
 if __name__ == "__main__":
     try:
